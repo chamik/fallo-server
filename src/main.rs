@@ -8,6 +8,7 @@ use rocket::{
     Data, Request,
 };
 use serde::Deserialize;
+use serde_json::{json, Map, Value};
 use sled::{Config, Db};
 use std::fs;
 use tokio::io::AsyncReadExt;
@@ -19,6 +20,7 @@ struct ApiKey<'r>(&'r str);
 struct AppConfig {
     db_path: String,
     api_key: String,
+    port: usize,
 }
 
 #[derive(Debug)]
@@ -96,6 +98,29 @@ async fn insert(
     Ok(())
 }
 
+#[get("/")]
+async fn list(db: &rocket::State<Db>) -> String {
+    let mut json_objects = Map::new();
+
+    for result in db.iter() {
+        match result {
+            Ok((key, val)) => {
+                let key_str = String::from_utf8_lossy(&key).into_owned();
+                let val_str = String::from_utf8_lossy(&val).into_owned();
+
+                json_objects.insert(key_str, json!(val_str));
+            }
+            Err(e) => {
+                eprintln!("Error iterating over entries: {:?}", e);
+            }
+        }
+    }
+
+    let json_value = Value::Object(json_objects);
+
+    serde_json::to_string(&json_value).unwrap()
+}
+
 #[catch(400)]
 fn bad_request() -> String {
     "Invalid URL data".to_string()
@@ -114,14 +139,17 @@ fn internal_server_error() -> String {
 #[launch]
 fn rocket() -> _ {
     let cf = initialize_config().expect("Unable to parse config");
+    let port = cf.port;
+
     let db = initialize_database(&cf.db_path).expect("Failed to initialize database");
 
     rocket::build()
         .manage(db)
         .manage(cf)
+        .configure(rocket::Config::figment().merge(("port", port)))
         .register(
             "/",
             catchers![bad_request, unauthorized, internal_server_error],
         )
-        .mount("/", routes![redirect, insert])
+        .mount("/", routes![redirect, insert, list])
 }
