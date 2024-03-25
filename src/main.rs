@@ -61,6 +61,26 @@ fn initialize_config() -> Result<AppConfig, toml::de::Error> {
     toml::from_str::<AppConfig>(&text)
 }
 
+#[delete("/<short>")]
+fn delete(
+    short: &str,
+    key: Result<ApiKey<'_>, ApiKeyError>,
+    db: &rocket::State<Db>,
+) -> Result<Status, NotFound<String>> {
+    if let Err(_e) = key {
+        return Ok(Status::Unauthorized);
+    }
+
+    if let Ok(_) = db.remove(short) {
+        return Ok(Status::Ok);
+    }
+
+    Err(NotFound(format!(
+        "There is no redirect for the key `{}`",
+        short
+    )))
+}
+
 #[get("/<short>")]
 fn redirect(short: &str, db: &rocket::State<Db>) -> Result<Redirect, NotFound<String>> {
     if let Ok(Some(value)) = db.get(short.as_bytes()) {
@@ -151,5 +171,5 @@ fn rocket() -> _ {
             "/",
             catchers![bad_request, unauthorized, internal_server_error],
         )
-        .mount("/", routes![redirect, insert, list])
+        .mount("/", routes![delete, insert, list, redirect])
 }
